@@ -1,0 +1,24 @@
+[package]
+name = "autompg"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "autompg"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.98"
+chrono = { version = "0.4.41", features = ["serde"] }
+csv = "1.3.1"
+env_logger = "0.11.8"
+libgtr = "0.1.1"
+log = "0.4.27"
+mxpsu = "0.1.1"
+regex = "1.11.1"
+serde = { version = "1.0.219", features = ["derive"] }
+serialport = "4.7.2"
+simple_logger = "5.0.0"
+tokio = { version = "1", features = ["rt-multi-thread","macros","sync","time"] }
+clap = { version = "4.0", features = ["derive"] }
+plotters = "0.3"
