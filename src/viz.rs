@@ -278,10 +278,25 @@ fn create_surface_plot(
         .y_desc("Frequency Bin")
         .draw()?;
     
-    // Color mapping with outlier clipping
-    for (t_idx, fft_row) in fft_data.iter().enumerate() {
-        for (f_idx, &magnitude) in fft_row.iter().enumerate() {
-            // Clip outliers to the 95th percentile
+    // Create high-resolution interpolated surface
+    let interpolation_factor = 4; // 4x interpolation for smoother surface
+    let interp_time_bins = time_bins * interpolation_factor;
+    let interp_freq_bins = freq_bins * interpolation_factor;
+    
+    // Calculate the size of each interpolated cell in chart coordinates
+    let time_step = time_bins as f64 / interp_time_bins as f64;
+    let freq_step = freq_bins as f64 / interp_freq_bins as f64;
+    
+    for it in 0..interp_time_bins {
+        for ift in 0..interp_freq_bins {
+            // Map interpolated coordinates to original data coordinates
+            let time_coord = (it as f64 + 0.5) * time_step;
+            let freq_coord = (ift as f64 + 0.5) * freq_step;
+            
+            // Bilinear interpolation
+            let magnitude = bilinear_interpolate(&fft_data, time_coord, freq_coord);
+            
+            // Clip outliers
             let clipped_magnitude = magnitude.min(max_magnitude).max(min_magnitude);
             
             let normalized_mag = if max_magnitude > min_magnitude {
@@ -290,21 +305,32 @@ fn create_surface_plot(
                 0.0
             };
             
-            // Improved color gradient: Blue -> Cyan -> Yellow -> Red
-            let color = if normalized_mag < 0.33 {
-                let t = normalized_mag / 0.33;
-                RGBColor(0, (255.0 * t) as u8, 255) // Blue to Cyan
-            } else if normalized_mag < 0.66 {
-                let t = (normalized_mag - 0.33) / 0.33;
-                RGBColor((255.0 * t) as u8, 255, (255.0 * (1.0 - t)) as u8) // Cyan to Yellow
+            // Improved color gradient with gamma correction for better perception
+            let gamma_corrected = normalized_mag.powf(0.5); // Gamma correction
+            
+            let color = if gamma_corrected < 0.25 {
+                let t = gamma_corrected / 0.25;
+                RGBColor(0, 0, (128.0 + 127.0 * t) as u8) // Dark blue to blue
+            } else if gamma_corrected < 0.5 {
+                let t = (gamma_corrected - 0.25) / 0.25;
+                RGBColor(0, (255.0 * t) as u8, 255) // Blue to cyan
+            } else if gamma_corrected < 0.75 {
+                let t = (gamma_corrected - 0.5) / 0.25;
+                RGBColor((255.0 * t) as u8, 255, (255.0 * (1.0 - t)) as u8) // Cyan to yellow
             } else {
-                let t = (normalized_mag - 0.66) / 0.34;
-                RGBColor(255, (255.0 * (1.0 - t)) as u8, 0) // Yellow to Red
+                let t = (gamma_corrected - 0.75) / 0.25;
+                RGBColor(255, (255.0 * (1.0 - t * 0.8)) as u8, 0) // Yellow to red
             };
             
+            // Draw filled rectangle for this interpolated cell
+            let x1 = it as f64 * time_step;
+            let x2 = (it + 1) as f64 * time_step;
+            let y1 = ift as f64 * freq_step;
+            let y2 = (ift + 1) as f64 * freq_step;
+            
             chart.draw_series(std::iter::once(Rectangle::new([
-                (t_idx as f64, f_idx as f64), 
-                (t_idx as f64 + 1.0, f_idx as f64 + 1.0)
+                (x1, y1), 
+                (x2, y2)
             ], color.filled())))?;
         }
     }
@@ -318,8 +344,38 @@ fn create_surface_plot(
     )))?;
     
     root.present()?;
-    println!("FFT surface plot saved to: {} (outliers clipped to 95th percentile)", output_file);
+    println!("FFT surface plot saved to: {} (high-resolution interpolated surface)", output_file);
     Ok(())
+}
+
+fn bilinear_interpolate(data: &[Vec<f64>], x: f64, y: f64) -> f64 {
+    let x_max = data.len() as f64 - 1.0;
+    let y_max = data[0].len() as f64 - 1.0;
+    
+    // Clamp coordinates
+    let x_clamped = x.max(0.0).min(x_max);
+    let y_clamped = y.max(0.0).min(y_max);
+    
+    // Get integer and fractional parts
+    let x0 = x_clamped.floor() as usize;
+    let y0 = y_clamped.floor() as usize;
+    let x1 = (x0 + 1).min(data.len() - 1);
+    let y1 = (y0 + 1).min(data[0].len() - 1);
+    
+    let dx = x_clamped - x0 as f64;
+    let dy = y_clamped - y0 as f64;
+    
+    // Get corner values
+    let v00 = data[x0][y0];
+    let v10 = data[x1][y0];
+    let v01 = data[x0][y1];
+    let v11 = data[x1][y1];
+    
+    // Bilinear interpolation
+    let v0 = v00 * (1.0 - dx) + v10 * dx;
+    let v1 = v01 * (1.0 - dx) + v11 * dx;
+    
+    v0 * (1.0 - dy) + v1 * dy
 }
 
 fn get_cog_value(record: &Record, sensor: usize) -> f64 {
